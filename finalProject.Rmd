@@ -1,0 +1,178 @@
+---
+title: "Spot it!"
+subtitle: "Analyzing my 2024 Spotify listening data"
+author: "Jenn Leishman"
+date: "`r Sys.Date()`"
+output:
+  pdf_document: 
+    latex_engine: xelatex
+    toc: true
+  word_document: default
+header-includes:
+- \usepackage{fvextra}
+- \DefineVerbatimEnvironment{Highlighting}{Verbatim}{breaklines,commandchars=\\\{\}}
+---
+
+\newpage
+
+```{r include = FALSE}
+library(tidyverse)
+library(jsonlite)
+library(lubridate)
+library(viridis)
+library(caret)
+library(pROC)
+library(ggimage)
+```
+
+# Introduction
+
+I think it's a naturally human thing to be curious about your own habits and data. As people, everything we do everyday contributes to some sort of data that, though not collected, can be transferred to physical statistics. Some of these are collected using modern technology, including how many steps you take, or your heartrate throughout the day. Others are self-recorded, and many people have taken to apps such as Goodreads or Letterboxd to record and rate their media consumption.
+
+For music listeners, Spotify, a popular music streaming platform, can collect statistics for you. The app produces an annual "Spotify Wrapped", which produces a slideshow of personalized statistics and top songs. 
+
+This report is inspired by that concept.
+
+I was curious to download and analyze my own Spotify data, and see what patterns I could observe using the Tidyverse and data wrangling/modelling skill I have gained. I learned that I could download my own Spotify data in a JSON format, which I learned could actually be read into R using the jsonlite package.^[https://datacarpentry.github.io/r-socialsci/07-json#:~:text=You%20can%20read%20the%20JSON,does%20not%20download%20the%20file.] 
+
+## My data
+
+As I mentioned, my data file was downloaded from Spotify in a JSON format. I read in my data into a dataframe, and then used the head and glimpse functions to view it. 
+
+```{r}
+json <- fromJSON("StreamingHistory_music_01.json")
+song_data <- as.data.frame(json)
+head(song_data)
+glimpse(song_data)
+```
+
+As you can see, the data has 4 columns and 8,924 rows. These columns are endTime, containing the date and time I finished the song (in character format), artistName, trackName, and msPlayed (milliseconds played). I honestly was hoping that my data would give me more song information, such as album, genre or song length, however this was not the case. 
+
+Given the limited information included in my data, I actually attempted to access the Spotify API and use it in R. Unfortunately, though this is hypothetically possible, as the Spotify API would contain further specific song information, I was not able to get working code and access to the API in R, as it takes certain developer accounts and access codes. I also could not find a comprehensive only song database to use that not too outdated to join with my Spotify data.
+
+This leaves us with my data, stored in a dataframe titled song_data. Though I'm limited in my ability to identify different genre patterns in my listening, I still am able to use the dates to my advantage. Also, each time I listened to a song is a different row entry in the dataframe, which means I do have a means of figuring out how many times I listened to a song.
+
+## Guiding research topic
+
+**Does time of day or time of year have an impact on the amount of music I listen to?**
+
+I really like the focus of my topic being on predicting my own habits. Data wrangling and modelling can be very useful in all areas, however, can also be applied to understand patterns of yourself for personal use and analysis.
+
+\newpage
+
+# Wrangling and visualization 1: Top artists
+
+The first element of data wrangling I set myself up with was mostly for fun rather than to aid in my research question. 
+
+By using the Tidyverse to find my most listened to artists of 2024, I was able to learn new graphing techniques and also practice some basic data wrangling skills.
+
+First, even though I know it's unconventional in "tidy" data, I decided to create a key in order to identify unique songs. If I just used the trackName variable, there is a high chance that there are multiple songs I listened to throughout the year with the same name. Therefore, I created a new column titled "fullKey" and in that, used a stringr function to combine the trackName and artistName.
+
+```{r}
+# Create a key to identify song title/artist pairs
+song_data_w_key <- song_data|>
+  mutate(fullKey = str_c(trackName,",",artistName)) 
+```
+
+
+Next, I needed to define what it means to "listen" to a song or an artist. For the sake of this specific analysis, I decided to only count songs I listened to more than 50% of.
+
+How, Jenn, would you be able to do this if the full length of the song is not included in the dataframe?
+
+Great question! I don't actually know the full length of the song. That being said, I can make an edcuated guess using the msPlayed variable. A majority of songs I lisetned to, I would have listened to them all the way through at least one time in the past year. Of course, there are some songs I just never listened to all the way through, but logically, these would be obscure and not end up in my top songs or artists anyways. 
+
+Using this logic, I decided to assume that the total song length was equivalent to the maximum msPlayed for the song. I then could filter it by song instances where the msPlayed was greater than or equal to 50% of the total song length.
+
+```{r}
+# Making sure I only count songs where I listened to 50% or more
+song_data_time <- song_data_w_key |>
+  group_by(fullKey) |>
+  mutate(totalSongLength = max(msPlayed)) |>
+  filter(msPlayed >= 0.5*totalSongLength)
+```
+
+I could then count the number of times I listened to artists based on the number of times they appeared in my cleaned dataframe, and create a count column. I sliced the dataframe to only get the top 10 artists with the highest counts, who would be the 10 artists I listened to the most in 2024. 
+
+Furthermore, I wanted to use images in my visualization of this cleaned data. Therefore, I created a new column titled "image" to store the image files saved for each artist. 
+
+```{r}
+top_artists <- song_data_time |>
+  group_by(artistName) |>
+  mutate(count = n()) |>
+  arrange(desc(count)) |>
+  ungroup() |>
+  distinct(artistName, .keep_all = TRUE) |>
+  slice_head(n = 10) |>
+  mutate(
+    image = c("adriannelenker.jpeg","phoebebridgers.jpeg","adammelchor.jpg",
+              "chappellroan.jpeg","taylorswift.webp","boygenius.jpg",
+              "lucydacus.jpeg","tophouse.webp","fleetwoodmac.jpg",
+              "hozier.jpg")
+  )
+
+top_artists
+```
+
+Now we could plot! In order to include the images, I used the geom_image ggplot function.^[https://www.youtube.com/watch?v=mKOQCMlNnt0]
+
+```{r warning = FALSE}
+ggplot(top_artists, aes(x = reorder(artistName, count), y = count, fill = artistName)) +
+  geom_bar(stat = "identity", width = 0.95) +
+  geom_image(aes(image = image), size = 0.087, nudge_y = 2) +
+  coord_flip() +
+  labs(
+    title = "Jenn's top Spotify artists of 2024",
+    subtitle = "Sorted by number of times listened to a song by more than 50% through",
+    x = "Artist Name",
+    y = "Count"
+  ) +
+  theme(plot.title = element_text(face = "bold")) +
+  scale_fill_manual(values = c(
+    "#6c8fbb",
+    "#52543e",
+    "#a3d4e2",
+    "#0f9c9c",
+    "#f4e9c7",
+    "#925e9b",
+    "#b87640",
+    "#ba3e44",
+    "#f5b1e0",
+    "#cab29d"
+  )
+  ) +
+  guides(fill = FALSE) +
+  geom_text(aes(label = count), position = position_dodge(0.9), hjust = 1.9)
+```
+
+As I mentioned, this was mostly just a fun experiment for myself. However, this graph does reveal the count of different artists, count being how many times I listened to a song of theirs, and reveals my top artists. If you don't know their music, it likely doesnt' mean a lot to you, but serves as an intro into my data.
+
+\newpage
+
+# Wrangling and visualization 2: Seasons
+
+For my next visualization, I decided to start from scratch with my song_data dataframe, and re-wrangle it for a different purpose. More related to my research question, I decided that I wanted to visualize how season impacted the amount of music I listened to. 
+
+I used my data as well as an R package called lubridate^[https://lubridate.tidyverse.org/reference/lubridate-package.html] in order to pull the month from the timestamp.
+
+I also used mutate to calculate how many minutes of music I played each month, and then converted that from miliseconds to minutes for easier user comprehension. 
+
+```{r message = FALSE}
+songs_seasons <- song_data |>
+  mutate(monthAbb = month(endTime, label = TRUE)) |>
+  mutate(month = month(endTime)) |>
+  group_by(month) |>
+  mutate(msPlayedByMonth = sum(msPlayed)) |>
+  mutate(minPlayedByMonth = msPlayedByMonth / 60000) |>
+  select(monthAbb, minPlayedByMonth)
+
+```
+
+
+For my graph itself, I learned how to use a ggplot function annotate, because I wanted to color code the graph based on season to see spikes in season.^[https://stackoverflow.com/questions/9178024/ggplot2-shade-area-between-two-vertical-lines] This way, we can see how the minutes listened changes from winter to spring to summer to fall. 
+
+```{r}
+
+songs_seasons |>
+  ggplot(aes(x = monthAbb, y = minPlayedByMonth)) +
+  geom_line(group = 1) +
+  annotate("rect", xmin = 0.6, xmax = 3, ymin = -Inf, ymax = Inf, fill = "ligh
