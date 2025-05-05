@@ -7,4 +7,4 @@ This final project was an assignment for STAT-228: Intro to Data Science at Simm
 
 Data is my own user data, downloaded from Spotify
 
-Analysis and modelling of Spotify data and music listening habits based on hour of day and month of year
+Analysis and modeling of personal Spotify data and music listening habits based on hour of day and month of year.
